@@ -1,0 +1,425 @@
+---
+title: "EASY COST - PRICING PREDICTION & PCA"
+output: html_notebook
+---
+
+# HOMEWORK EASY COSTS
+
+HYPOTHESIS :
+We considered there that the Price was a price per lot and not per unit.
+
+We will therefore add a column Price per Unit, PriceU, that we will use for most of the analysis here.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(FactoMineR)
+```
+
+
+```{r}
+caps <- read.csv2("Data/ScrewCaps.csv", sep = ",")
+caps <- caps[,2:12]
+caps$Price <- as.numeric(as.character(caps$Price))
+caps$weight <- as.numeric(as.character(caps$weight))
+caps$Length <- as.numeric(as.character(caps$Length))
+caps$Diameter <- as.numeric(as.character(caps$Diameter))
+
+caps <- caps %>% mutate(PriceU = Price/Mature.Volume)
+
+caps <- caps[c(2:4,8,11,12,10,1,5:7,9)]
+
+```
+
+
+```{r}
+View(caps)
+head(caps)
+dim(caps)
+names(caps)
+summary(caps)
+
+```
+
+#Q2 
+
+_Distribution of the Price ?_
+
+We consider here the distribution of the price per unit.
+
+```{r}
+quantile(caps$PriceU)
+```
+
+
+```{r}
+boxplot(caps$PriceU,
+        main= "Prices of the caps",
+        xlab="Price",
+        horizontal = TRUE)
+
+caps %>% 
+  arrange(-PriceU) %>% 
+  head(n = 10)
+```
+Interpretation : most of the observations are gathered in between a small range of price, but some isolated prices very high. We can see 4 outliers in the variable PriceU, 10 times higher than the next variables.
+
+```{r}
+caps <- caps %>%
+  subset(PriceU <= 0.01)
+
+View(caps)
+```
+
+
+
+
+```{r}
+plot(density.default(x=caps$PriceU)) 
+
+```
+
+The density of the price looks like a mixture of normal random variable with a very high weight on the random law with the lowest mean (around 0)
+
+
+_Does the price depends on the Length ? Weight ?_
+
+We consider here the Price per unit because length and weight are unity caracteristics
+
+```{r}
+cor(caps$PriceU, caps$Length)
+cor(caps$PriceU, caps$weight)
+
+ggplot(caps,
+       aes(x=Length , y= PriceU))+
+  geom_point() +
+  geom_smooth() +
+  ggtitle("Price in function of the Length")
+
+ggplot(caps,
+       aes(x=weight, y= PriceU))+
+  geom_point() +
+  geom_smooth() +
+  ggtitle("Price in function of the weight")
+
+
+```
+Correlation between the variable Price per unit and Lengths is 0.25 and correlation between Price per unit and weight is 0.27, which mean for both that they are a little correlated.
+
+The correlations between the variables Length and PriceU on one side and weight and PriceU on the other side have the same kind of shape. The 2 relationships are not linear here.
+
+
+_Does the price depends on Impermeability ?_
+
+```{r}
+
+ggplot(data = caps,
+       aes(x = Impermeability, y = PriceU)) +
+  geom_boxplot() +
+  ggtitle("Relationship between Price per unit and Impermeability")
+
+```
+
+Impermeability and prices per unit are correlated : the distribution of the price among the observations of impermeability Type2 is not the same as the distribution of the price among the observations of impermeability Type 1.
+
+_Price and Shape?_
+
+```{r}
+ggplot(data = caps,
+       aes(x = Shape, y = PriceU)) +
+  geom_boxplot() +
+  ggtitle("Relationship between Price per unit and Shape")
+```
+
+Same as for the impermeability, the Shape and the price per unit are correlated.
+
+
+_What is the less expensive supplier ?_
+
+```{r}
+capsmin <- caps %>% 
+  group_by(Supplier) %>%
+  mutate(meanPrice = mean(PriceU)) %>%
+  select(Supplier, meanPrice) %>%
+  distinct(Supplier, meanPrice)
+  
+capsmin
+
+```
+On average, Supplier C is the less expensive supplier. We didn't take into account the mix product here but we don't know yet what variables are most responsible for a specific type of caps (in order to create clustering of caps).
+
+#Q3: identify potential outliers
+```{r}
+boxplot(caps$Mature.Volume,
+        main= "Mature Volume distribution",
+        horizontal = TRUE)
+
+quantile(caps$Mature.Volume)
+
+
+ggplot(caps,
+       aes(x=Mature.Volume, y= PriceU))+
+  geom_point() +
+  geom_smooth() +
+  ggtitle("Price in function of the Mature Volume")
+
+```
+
+
+
+
+```{r}
+caps %>% filter(Mature.Volume == max(Mature.Volume)) %>% head()
+
+```
+
+We can see from this plot that some specific variables are totally out of range compared to the quartiles of the plot. And indeed, looking at the datas, we can see that 4 have a value of 800 000, while the next value is 415 000, and which represents 17,8 times the mean values (45 000). These 4 caps might be outliers. These 4 observations also have in common :
+- The same weight (1.06)
+- The same diameter
+- 4 pieces
+- Impermeability of Type 1
+- Shape 1
+- Finishing Lacquering
+- Raw material PP
+
+Out of the 10 other variables, they have in common 7 features. The only things that differes these 4 observations are : the length (but very close), the supplier (A or B) and the Price (from 9 to 12). Are they the same object but sold at different prices ?
+
+These caps seems to be one specific kind of cap supplied both by A and B. I won't remove them from my analysis because even if they might add a biais to the correlation between the variables Mature.Volume and Price, they look like a very specific kind of caps that exists. 
+
+#Q4: PCA
+
+We will perform a PCA on the quantitative variables of the dataset except from the price per unit and the price that we will add as supplementary variables. Indeed, these 2 variables are the ones we want to be able to predict knowing the others.
+
+```{r}
+capspca <-PCA(caps, quanti.sup = 6:7, quali.sup = 8:12)
+```
+
+The aim of the PCA is to project the variables and observations into a smaller subspace that still reflects most of the observation of the dataset caps.
+The categorical variables are here not integrated into the process to construct the dimensions of this new subspace, but are afterwords projected into the observations map.
+To project them into the observations map, for each categorical variable :
+- clusters of observations having the same features are created
+- the feature is then placed on the map as the barycenter of this cluster
+
+#Q5: Correlation matrix
+
+MATRICE
+
+```{r}
+
+M = as.matrix(caps[,1:5])
+n <- nrow(M)
+H <- diag(rep(1,n)) - (1/n)*rep(1,n) %*% t(rep(1,n))
+S <- (1/n) * t(M) %*% H %*% M
+
+S
+
+```
+
+_Comment_
+
+Length, weight and Diameter have a positive correlation with the Diameter, Length is the highest and indeed, in the correlation circle, we can see that these  variables are very well projected on the first dimension. On the other side, nb.of.piece and Mature.Volume have a negative correlation with Diameter, and indeed, the variables on the negative side of the circle if we consider the Dimension1. We can also see that these 2 variables are related with the 2nd dimension of the PCA rather than with the 1rst one.
+
+#Q6: On what kind of relationship PCA focuses ?
+
+PCA focuses mostly on linear relationships between quantitative variables.There might be some loss of information here on 2 cases :
+- qualitative variables are not taken into account in the construction of the model : it could be a problem here because half of the variables are qualitative
+- non linear relationship between quantitative variables are not rendered well in the PCA. for instance her fore the graph "Price in function of the Mature.volume" we can see that the variables are not linearly correlated (but it's also the case for the variables Length and Weight which are not)
+
+#Q7: PCA outputs
+
+PCA simplified to be able to read the qualitative variables
+
+```{r}
+res <- PCA(caps[,c(1:7,10,12)], quanti.sup = 6:7, quali.sup = 8:9)
+plot(res, select = "5 contrib")
+
+```
+
+Here, the price per unit is not very significatively explained by the dimension compared to the Price per lot, we might want to create prediction model giving back the price per lot.
+
+_Impermeability = Type2_
+We can see that the Type2 is on the right of Dim1 but at the zero level of Dim2. The cluster regrouping all the observations of type 2 is therefore in the right/middle side of the graph. 
+We can therefore say that the category Type 2 in Impermeability is correlated to Dim1, and therefore to the variables Length, Diameter and Weight. On the other hand, Type 2 doesn't have any correlation with Dim2, and therefore with the variables Nb of pieces and Mature.Volume.
+
+_Raw.Material= PS_
+The category PS is very close to the category Type 2, the cluster regrouping the observations being of PS raw.material is very close to the cluster regrouping observations of Type 2. The 2 qualitative categories look correlated (both present more or less in the same observations). Therefore, the category PS look also correlated to Dim 1 (a little less than Type2 though), but not to Dim2.
+
+_% of inertia_
+The percentage of inertia for the 1rst dimension is 61,49%, which means that Dim 1 accounts for 61,49% of the informations contained in the quantitative active variables used to perform the PCA (here we didn't use the Price as an active variable).
+The 2nd dimension sums up 21,09% of the information of the quantitative active variables.
+So overall, PCA gives back 82,58% of the information contained in the quantitative active variables of the Dataset.
+
+
+#Q8:
+
+```{r}
+capspca$var$coord[,1:2]
+
+```
+
+# Q9:
+
+When we want to apply clustering to a dataset having a high number of variables, performing a PCA before allow us to work with the synthetic variables for the clustering, and therefore to diminish the number of variables we are dealing with. We use the minimum number of dimensions that summarizes most of the variables, we can start by 2 dimensions, we see how much more information could give us 3 dimensions, then 4 dimensions, and we stop to add a dimension when adding one dimension doesn't give much more information than not adding it.
+
+```{r}
+  
+#estim_ncp(caps[,1:5], ncp.min = 0, ncp.max = NULL, scale= TRUE, method = "GCV")
+
+barplot(capspca$eig[,3],main="Cumulative percentage of inertia", names.arg=paste("dim",1:nrow(capspca$eig)))
+
+```
+
+We will keep the 3 first dimensions here, because adding the forth dimension doesn't significantly change the level of information of the PCA. 
+The percentage of inertia of the 3 first variables is of 99% already, no need to complicate the model by adding a new variable.
+
+# Q10 :
+
+```{r}
+capspca_dim3 <- PCA(caps, ncp= 3, quanti.sup = c(6,7), quali.sup = 8:12)
+
+```
+
+
+```{r}
+
+capskmeans <- kmeans(data.frame(capspca_dim3$ind$coord), 4)
+capskmeans
+```
+
+We will chose to keep 4 clusters here, because the ratio Between inertia / total inertia is at 73%, which means that the clusters are significant, and 4 clusters is still a small enough number of cluster for the interpretation : adding more clusters might just make the interpratation more complicated without being much more significant.
+
+
+- For 6 clusters : (between_SS / total_SS =  80.0 %)
+- For 5 clusters : (between_SS / total_SS =  76.8 %)
+- For 4 clusters : (between_SS / total_SS =  73.5 %)
+- For 3 clusters : (between_SS / total_SS =  64.5 %)
+- For 2 clusters : (between_SS / total_SS =  17.3 %)
+
+
+
+```{r}
+ggplot(data.frame(capspca_dim3$ind$coord), 
+       aes(x= capspca_dim3$ind$coord[,1],  y= capspca_dim3$ind$coord[,2])) + 
+  geom_point(aes(color=data.frame(capskmeans$cluster)[,1]))+ 
+  ggtitle("Individual factor map with kmeans cluster") +
+  xlab("Dim1 PCA") +
+  ylab("Dim2 PCA") +
+  scale_color_continuous(name = "Number of the cluster")
+```
+
+
+
+
+#Q11:
+
+```{r}
+capshcpc <- HCPC(capspca_dim3, nb.clust = -1)
+```
+The clusters made with HCPC looks very similar to the one made with Kmeans methode (cf. plot in the question 11)
+
+# Q12 :
+
+```{r}
+capshcpc$desc.var$category$`3`
+```
+
+For the Hierarchical Clustering, we will keep 3 cluster (what is automatically suggested by the function). The explanation lies on the inertia gain barplot. once adding a cluster does not add much more inertia than not adding it, we stop. Here, going from 1 to 2 and from 2 to 3 clusters adds significant inertia, while adding a 4th one doesn't so much more.
+
+_description of one cluster_
+
+From the Factor.map, we can see that the 3rd cluster is very relevant with the 1rst dimension but not so much with the 2nd dimension. 
+Now if we look at the description, the most significant modalities of this class are Impermeability of type2 and Raw material = PS, and indeed, these 2 modalities are projected in the PCA along the 1rst dimension, but on the level 0 of the 2nd dimension. Here :
+- 70% of the observations being of impermeability=Type2 on the whole database are present in the cluster
+- 70% of the observations of the cluster are of impermeability=Type2.
+- on the whole dataset, only 10% of observations have the modality Impermeability=Type2
+- the pvalue testing the difference between Mod/cla and Global of the modality Impermeability=Type2 is really significant, which mean that the modality Impermability=Type2 describes very well the datas.
+
+For the other variables :
+- the modality Raw.material= PS, Shape= shape2,Finishing= lacquering are very present in the cluster, and the pvalue is very significant so these modalities describe well the cluster.
+- the other modalities are less present in the cluster than in the Global dataset, so they don't describe well the cluster (with still a high pvalue, which means that we can assert their unsignificance in the cluster).
+
+
+# Q13:
+
+We should stop adding a component when the addition of this component doesn't really add much more inertia in the model. A strategy to choose the number of components would be to plot the cumulative percentage of inertia given by each dimension. We start from the beginning of the plot (1 dimension) and we consider adding the next one if the cumulative percentage is significantly higher with the new component than without it. We do it until the graph takes the shape of a plane surface. 
+However, this method cannot be used alone, we should always keep in mind the analysis of the dataset, and see how does the number of dimensions will help the interpretation. It depends on the dataset and the goal of the analysis. For instance here, since we only have 5 quantitative variables taken into account in the PCA, keeping 5 dimensions doesn't make sense at all because it doesn't simplify the model.
+
+Here, we chose 3 components because the gap of inertia going from 3 to 4 cluster was not worth complicating the model. The difference between using 3 components and 5 (as default in the PCA) is not significant here, the variables are projected along the same 2 first dimensions more or less in the same way, and the cloud of observation look similar : it shows that by keeping 3 components, we simplified the model without losing too much information compared to the first analysis.
+
+```{r}
+capshcpc <- HCPC(capspca, nb.clust = -1)
+```
+
+The clustering obtained on the 3 components kept is very similar to the one on the initial data. It means that we chose well the 3 components : these dimensions sum up very well the informations contained on the initial variables.
+
+# Q14:
+
+```{r}
+catdes(caps, num.var = 8)
+
+```
+
+
+This description can help us to know what are the specificities of each supplier by knowing the modalities that are the most represented in each supplier's product.
+
+The supplier A for instance, provides a lot of caps made of PS (35% of their products are made of PS while the whole dataset contains only 13% of PS. The pvalue is also significant for the impermeability of type 2 in this supplier.
+
+If we want caps made of ABS, we should ask the supplier B, because 100% of the ABS caps are provided by him.
+
+Finally, the supplier C only provides caps made of PP.
+
+With this function, we have a good idea of what type of product is provided by each supplier.
+
+
+# Q15:
+
+
+```{r}
+
+capsFAMD <- FAMD(caps, sup.var= 6:7)
+
+```
+
+
+```{r}
+capshcpc2 <- HCPC(capsFAMD, nb.clust = -1)
+```
+The classification now takes into account the categorical variables, hence, the variables are much more numerous, and the clusters more complex, but also more significant because more information is taken into account to form them. The number of cluster has here gone from 3 to 6 when we added the categorical variables. 
+
+# Q16 - regression model:
+
+We will here use the price per lot, because we saw that this price might be easier to predict with our model compared to the price per unit. (in question 7)
+
+
+```{r}
+
+capslm <- lm(Price ~ Diameter + weight + nb.of.pieces + Mature.Volume + Length, data = caps )
+
+summary(capslm)
+
+```
+The last column represents the pvalue for the test H0 : "variable non significant to explain the price" against H1: " variable correlated to the price"
+
+Here, the significant variables to explain the price are the nb.of.pieces and Mature.Volume (because they have the lowest pvalue), and then but much less the weight. The nb.of.pieces is the most significant variable taken into account in our regression model.
+
+# Q17:
+
+We did a global model instead of one supplier per supplier because we want our model to be appliable to any kind of supplier. We want  to predict the price in the market of the caps, not only in one supplier. This model can also help us to compare each supplier according to the same parameters.
+
+By doing a global model, we also assumed that the suppliers work in a common market place were the criteria to price what they sell are similar from one another.
+
+
+# Q18:
+
+Adding zeros will change the mean and the variability of each variable, it's not a good option at all.
+Implementing the median is also not an optimal solution : if the mean is different from the median, then the median will also change the mean and the variability of each variable.
+In both method, the variability of the whole dataset is biaised by the value attributed to the Missing Values, so they are not good options. Instead, we could implement a stochastic PCA method to reconstruct the dataset and therefore replace the missing values by predicted values with a certain level of confidence. We could then implement a cross-validation method to analysis the errors and to assess our reconstruction of the dataset.
+
+Adding a new categorical modality "Missing" will also have a consequence on the FAMD analysis: the algorithm will automatically regroup the observations of modality "missing" together as if it was a new category, and this will have an impact on the clusters created according to the categorical variables. Same as for the quantitative variables, we could implement a MCA algorithm to find a pattern in the missingness of the values, and assess what might be their predictive modalities.
+
+
+
+
+
+
